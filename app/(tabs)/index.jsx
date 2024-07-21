@@ -1,41 +1,46 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { StyleSheet, View, Text, TouchableOpacity } from "react-native";
+import { StyleSheet, View, Text, TouchableOpacity, Alert } from "react-native";
 import BottomSheet, { BottomSheetView } from "@gorhom/bottom-sheet";
 import { ScrollView } from "react-native-gesture-handler";
-
-import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
+import MapView, { Marker } from "react-native-maps";
 import * as Location from "expo-location";
 import { supabase } from "@/lib/supabase";
-import { ThemedView } from "@/components/ThemedView";
-import { ThemedText } from "@/components/ThemedText";
+import Icon from "react-native-vector-icons/FontAwesome";
+import DateTimePicker from "@react-native-community/datetimepicker";
+import moment from "moment";
 
 export default function HomeScreen() {
   const [selectedTab, setSelectedTab] = useState("To complete");
   const [session, setSession] = useState(null);
-  const snapPoints = useMemo(() => ["25%", "50%", "75%"], []);
   const [tasksNew, setTasksNew] = useState([]);
+  const [location, setLocation] = useState(null);
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
-  const [location, setLocation] = useState(null); // Initialize as null
+  const snapPoints = useMemo(() => ["25%", "50%", "75%", "90%"], []);
 
   useEffect(() => {
     getPermissions();
     async function fetchSession() {
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
       setSession(session);
-      console.log("this is the user session from index page - ", session.user?.id);
-      employeeTasks(session.user?.id);
+      fetchTasks(session.user?.id, selectedDate);
     }
 
     fetchSession();
 
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-    });
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        setSession(session);
+      }
+    );
 
     return () => {
       authListener.subscription.unsubscribe();
     };
-  });
+  }, [selectedDate]);
 
   const getPermissions = async () => {
     let { status } = await Location.requestForegroundPermissionsAsync();
@@ -47,19 +52,23 @@ export default function HomeScreen() {
     let currentLocation = await Location.getCurrentPositionAsync({});
     setLocation(currentLocation);
   };
+  const fetchTasks = async (userId, date) => {
+    const startOfDay = moment(date).startOf("day").toISOString();
+    const endOfDay = moment(date).endOf("day").toISOString();
 
-  const employeeTasks = async (userId) => {
     const { data, error } = await supabase
       .from("employee_tasks")
       .select("*")
-      .eq("assigned_to_id", userId);
+      .eq("assigned_to_id", userId)
+      .gte("completion_date", startOfDay)
+      .lte("completion_date", endOfDay);
 
     if (error) {
+      console.error(error);
     } else {
       setTasksNew(data);
     }
   };
-
   const handlePhonePress = (phoneNo) => {
     console.log(phoneNo);
   };
@@ -68,28 +77,68 @@ export default function HomeScreen() {
     console.log(mapLink);
   };
 
+  const handleSendLocation = async () => {
+    if (location) {
+      const userId = session?.user?.id; // Get the user ID from the session
+      if (userId) {
+        const { data, error } = await supabase
+          .from("employee_users")
+          .update({
+            latitude: location.coords.latitude,
+            longitude: location.coords.longitude,
+          })
+          .eq("employee_id", userId); // Filter for the specific user ID
+
+        if (error) {
+          console.error("Error updating location:", error.message);
+        } else {
+          console.log("Location updated successfully:", data);
+          Alert.alert(
+            "Location Sent",
+            `Location: ${location.coords.latitude}, ${location.coords.longitude}`
+          );
+        }
+      } else {
+        Alert.alert("No User ID", "User ID not available.");
+      }
+    } else {
+      Alert.alert("No Location", "Location not available.");
+    }
+  };
+
+  const handleDateChange = (event, selectedDate) => {
+    const currentDate = selectedDate || date;
+    setShowDatePicker(false);
+    setSelectedDate(currentDate);
+  };
+
   const renderItem = (item) => (
-    <View key={item.id} style={[styles.taskContainer]}>
-      <Text style={styles.taskTime}>{item.created_at}</Text>
-      <View style={styles.taskTitleContainer}>
-        <Text style={styles.taskTitle}>{item.location_name}</Text>
-        <TouchableOpacity
-          onPress={() => handleMapPress(item.location_map_link)}
-        >
-          <Text style={styles.mapLink}>View on Map</Text>
-        </TouchableOpacity>
-        <Text style={styles.completionDate}>{item.completion_date}</Text>
-        <TouchableOpacity
-          onPress={() => handlePhonePress(item.location_poc_phoneNo)}
-        >
-          <Text style={styles.pocName}>{item.location_poc_name}</Text>
-          <Text style={styles.pocPhoneNo}>{item.location_poc_phoneNo}</Text>
-        </TouchableOpacity>
+    <View style={renderStyles.taskContainer}>
+      <View style={renderStyles.taskHeader}>
+        <Text style={renderStyles.taskTitle}>{item.location_name}</Text>
+        <View style={renderStyles.iconContainer}>
+          <TouchableOpacity
+            onPress={() => handleMapPress(item.location_map_link)}
+            style={renderStyles.iconStyle}
+          >
+            <Icon name="map-marker" size={24} color="#1E90FF" />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => handleEditPress(item.id)}
+            style={renderStyles.iconStyleSecond}
+          >
+            <Icon name="edit" size={24} color="#1E90FF" />
+          </TouchableOpacity>
+        </View>
       </View>
-      <Text style={styles.taskDescription}>{item.description}</Text>
-      <TouchableOpacity style={styles.editButton}>
-        <Text style={styles.editButtonText}>Edit Task</Text>
-      </TouchableOpacity>
+      <View style={renderStyles.pocContainer}>
+        <Text style={renderStyles.pocName}>{item.location_poc_name}</Text>
+        <Text style={renderStyles.pocPhoneNo}>{item.location_poc_phoneNo}</Text>
+      </View>
+      <Text style={renderStyles.taskDescription}>
+        Task created at {new Date(item.created_at).toLocaleDateString()}{" "}
+        {new Date(item.created_at).toLocaleTimeString()}
+      </Text>
     </View>
   );
 
@@ -105,8 +154,57 @@ export default function HomeScreen() {
       <BottomSheet snapPoints={snapPoints} index={2}>
         <BottomSheetView style={styles.bottomSheetContent}>
           <View style={styles.titleContainer}>
-            <Text style={styles.titleHeading}>21st July 2021</Text>
+            <TouchableOpacity
+              onPress={() =>
+                setSelectedDate(
+                  moment(selectedDate).subtract(1, "days").toDate()
+                )
+              }
+              style={{
+                marginLeft: 20,
+                padding: 8,
+                justifyContent: "center",
+                alignItems: "center",
+                width: 40,
+                height: 40,
+                borderRadius: 100,
+                backgroundColor: "#F0F0F0",
+              }}
+            >
+              <Icon name="chevron-left" size={24} />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setShowDatePicker(true)}>
+              <Text style={styles.titleHeading}>
+                {moment(selectedDate).format("DD MMM YYYY")}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() =>
+                setSelectedDate(moment(selectedDate).add(1, "days").toDate())
+              }
+              style={{
+                marginRight: 20,
+                padding: 8,
+                justifyContent: "center",
+                alignItems: "center",
+                width: 40,
+                height: 40,
+                borderRadius: 100,
+                backgroundColor: "#F0F0F0",
+              }}
+            >
+              <Icon name="chevron-right" size={24} />
+            </TouchableOpacity>
           </View>
+          {showDatePicker && (
+            <DateTimePicker
+              testID="dateTimePicker"
+              value={selectedDate}
+              mode={"date"}
+              display="default"
+              onChange={handleDateChange}
+            />
+          )}
           <View style={styles.buttonRow}>
             <TouchableOpacity
               onPress={() => setSelectedTab("To complete")}
@@ -171,6 +269,12 @@ export default function HomeScreen() {
           </ScrollView>
         </BottomSheetView>
       </BottomSheet>
+      <TouchableOpacity
+        style={styles.floatingButton}
+        onPress={handleSendLocation}
+      >
+        <Icon name="send" size={24} color="#fff" />
+      </TouchableOpacity>
     </View>
   );
 }
@@ -186,19 +290,18 @@ const styles = StyleSheet.create({
   },
   titleContainer: {
     flexDirection: "row",
-    justifyContent: "center",
+    justifyContent: "space-between",
     alignItems: "center",
-    gap: 8,
   },
   buttonRow: {
     flexDirection: "row",
     justifyContent: "space-around",
-    marginVertical: 15,
+    marginVertical: 20,
     marginHorizontal: 10,
   },
   titleHeading: {
     fontSize: 26,
-    fontWeight: 'bold',
+    fontWeight: "bold",
     lineHeight: 32,
   },
   button: {
@@ -241,32 +344,34 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: 0.75,
     borderColor: "#ccc",
+    backgroundColor: "#fff",
   },
-  taskTime: {
-    fontSize: 12,
-    color: "#666",
-    marginBottom: 5,
-  },
-  taskTitleContainer: {
+  taskHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     marginBottom: 10,
   },
   taskTitle: {
     fontSize: 18,
     fontWeight: "bold",
-    marginBottom: 5,
+    color: "#333",
   },
-  mapLink: {
-    color: "#1E90FF",
-    textDecorationLine: "underline",
+  iconContainer: {
+    flexDirection: "row",
+    gap: 10,
   },
-  completionDate: {
-    fontSize: 14,
-    color: "#666",
-    marginBottom: 5,
+  pocContainer: {
+    marginBottom: 10,
   },
   pocName: {
     fontSize: 16,
     fontWeight: "bold",
+    color: "#333",
+  },
+  pocEmail: {
+    fontSize: 14,
+    color: "#666",
   },
   pocPhoneNo: {
     fontSize: 14,
@@ -277,18 +382,83 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#333",
   },
-  editButton: {
-    alignItems: "center",
+  floatingButton: {
+    position: "absolute",
+    bottom: 20,
+    right: 20,
     backgroundColor: "#1E90FF",
-    padding: 10,
-    borderRadius: 5,
-  },
-  editButtonText: {
-    color: "#fff",
-    fontSize: 16,
+    borderRadius: 50,
+    width: 60,
+    height: 60,
+    alignItems: "center",
+    justifyContent: "center",
+    elevation: 5,
   },
   bottomSheetContent: {
     flex: 1,
     paddingHorizontal: 7,
+  },
+});
+
+const renderStyles = StyleSheet.create({
+  taskContainer: {
+    padding: 15,
+    marginVertical: 8,
+    marginHorizontal: 10,
+    backgroundColor: "#fff",
+    borderRadius: 8,
+    shadowColor: "#000",
+    shadowOpacity: 0.1,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  taskHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  taskTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+  },
+  iconContainer: {
+    flexDirection: "row",
+  },
+  pocContainer: {
+    marginTop: 2,
+  },
+  pocName: {
+    fontSize: 16,
+    fontWeight: "500",
+  },
+  pocPhoneNo: {
+    fontSize: 14,
+    color: "#555",
+  },
+  taskDescription: {
+    marginTop: 10,
+    fontSize: 14,
+    color: "#777",
+  },
+  iconStyle: {
+    padding: 8,
+    marginRight: 10,
+    justifyContent: "center",
+    alignItems: "center",
+    width: 40,
+    height: 40,
+    borderRadius: 100,
+    backgroundColor: "#F0F0F0",
+  },
+  iconStyleSecond: {
+    padding: 8,
+    marginRight: 5,
+    justifyContent: "center",
+    alignItems: "center",
+    width: 40,
+    height: 40,
+    borderRadius: 100,
+    backgroundColor: "#F0F0F0",
   },
 });
