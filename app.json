@@ -20,8 +20,10 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
+      "config": {
+        "googleMapsApiKey" : "AIzaSyDXhxdvc3F0LNhh7MzuR4qPCZOA6eM5HkU"
+      },
       "permissions": ["ACCESS_BACKGROUND_LOCATION"]
-
     },
     "web": {
       "bundler": "metro",

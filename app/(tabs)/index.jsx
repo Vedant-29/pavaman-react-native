@@ -1,201 +1,294 @@
-import { Image, StyleSheet, Platform } from "react-native";
+import React, { useEffect, useMemo, useState } from "react";
+import { StyleSheet, View, Text, TouchableOpacity } from "react-native";
+import BottomSheet, { BottomSheetView } from "@gorhom/bottom-sheet";
+import { ScrollView } from "react-native-gesture-handler";
 
-import { HelloWave } from "@/components/HelloWave";
-import ParallaxScrollView from "@/components/ParallaxScrollView";
-import { ThemedText } from "@/components/ThemedText";
+import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
+import * as Location from "expo-location";
+import { supabase } from "@/lib/supabase";
 import { ThemedView } from "@/components/ThemedView";
-import { View, Text, FlatList, TouchableOpacity } from "react-native";
-import { useState } from "react";
-
-const tasks = [
-  {
-    id: "1",
-    time: "10:30 AM - 11:30 AM",
-    title: "Programming",
-    description:
-      "Create a unique emotional story that describes better than words",
-    color: "#E6F7FF",
-    borderColor: "#1890FF",
-    icon: "💻",
-  },
-  {
-    id: "2",
-    time: "11:30 AM - 12:30 PM",
-    title: "Math",
-    description:
-      "Create a unique emotional story that describes better than words",
-    color: "#FFF1F0",
-    borderColor: "#FF4D4F",
-    icon: "🔢",
-  },
-  {
-    id: "3",
-    time: "11:30 AM - 12:30 PM",
-    title: "Science",
-    description:
-      "Create a unique emotional story that describes better than words",
-    color: "#FFF1F0",
-    borderColor: "#FF4D4F",
-    icon: "🔬",
-  },
-];
+import { ThemedText } from "@/components/ThemedText";
 
 export default function HomeScreen() {
   const [selectedTab, setSelectedTab] = useState("To complete");
+  const [session, setSession] = useState(null);
+  const snapPoints = useMemo(() => ["25%", "50%", "75%"], []);
+  const [tasksNew, setTasksNew] = useState([]);
+
+  const [location, setLocation] = useState(null); // Initialize as null
+
+  useEffect(() => {
+    getPermissions();
+    async function fetchSession() {
+      const { data: { session } } = await supabase.auth.getSession();
+      setSession(session);
+      console.log("this is the user session from index page - ", session.user?.id);
+      employeeTasks(session.user?.id);
+    }
+
+    fetchSession();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
+  });
+
+  const getPermissions = async () => {
+    let { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== "granted") {
+      console.log("Please grant permission");
+      return;
+    }
+
+    let currentLocation = await Location.getCurrentPositionAsync({});
+    setLocation(currentLocation);
+  };
+
+  const employeeTasks = async (userId) => {
+    const { data, error } = await supabase
+      .from("employee_tasks")
+      .select("*")
+      .eq("assigned_to_id", userId);
+
+    if (error) {
+    } else {
+      setTasksNew(data);
+    }
+  };
+
+  const handlePhonePress = (phoneNo) => {
+    console.log(phoneNo);
+  };
+
+  const handleMapPress = (mapLink) => {
+    console.log(mapLink);
+  };
 
   const renderItem = (item) => (
-    <View key={item.id} style={[styles.taskContainer, { backgroundColor: item.color, borderColor: item.borderColor }]}>
-      <Text style={styles.taskTime}>{item.time}</Text>
+    <View key={item.id} style={[styles.taskContainer]}>
+      <Text style={styles.taskTime}>{item.created_at}</Text>
       <View style={styles.taskTitleContainer}>
-        <Text style={styles.taskIcon}>{item.icon}</Text>
-        <Text style={styles.taskTitle}>{item.title}</Text>
+        <Text style={styles.taskTitle}>{item.location_name}</Text>
+        <TouchableOpacity
+          onPress={() => handleMapPress(item.location_map_link)}
+        >
+          <Text style={styles.mapLink}>View on Map</Text>
+        </TouchableOpacity>
+        <Text style={styles.completionDate}>{item.completion_date}</Text>
+        <TouchableOpacity
+          onPress={() => handlePhonePress(item.location_poc_phoneNo)}
+        >
+          <Text style={styles.pocName}>{item.location_poc_name}</Text>
+          <Text style={styles.pocPhoneNo}>{item.location_poc_phoneNo}</Text>
+        </TouchableOpacity>
       </View>
       <Text style={styles.taskDescription}>{item.description}</Text>
+      <TouchableOpacity style={styles.editButton}>
+        <Text style={styles.editButtonText}>Edit Task</Text>
+      </TouchableOpacity>
     </View>
   );
 
+  const filteredTasks = tasksNew.filter((task) => task.status === selectedTab);
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: "#A1CEDC", dark: "#1D3D47" }}
-      headerImage={
-        <Image
-          source={require("@/assets/images/partial-react-logo.png")}
-          style={styles.reactLogo}
-        />
-      }
-    >
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">21st July 2021</ThemedText>
-      </ThemedView>
-        <View style={styles.buttonRow}>
-          <TouchableOpacity
-            onPress={() => setSelectedTab("To complete")}
-            style={styles.button}
-          >
-            <Text
+    <View style={styles.container}>
+      <MapView style={styles.map} showsUserLocation showsMyLocationButton>
+        {tasksNew.map((marker, index) => (
+          <Marker key={marker.id} index={index} coordinate={marker} />
+        ))}
+      </MapView>
+      <BottomSheet snapPoints={snapPoints} index={2}>
+        <BottomSheetView style={styles.bottomSheetContent}>
+          <View style={styles.titleContainer}>
+            <Text style={styles.titleHeading}>21st July 2021</Text>
+          </View>
+          <View style={styles.buttonRow}>
+            <TouchableOpacity
+              onPress={() => setSelectedTab("To complete")}
               style={
                 selectedTab === "To complete"
-                  ? styles.buttonTextActive
-                  : styles.buttonText
+                  ? styles.buttonActive
+                  : styles.button
               }
             >
-              To complete
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => setSelectedTab("In Progress")}
-            style={styles.button}
-          >
-            <Text
+              <Text
+                style={
+                  selectedTab === "To complete"
+                    ? styles.buttonTextActive
+                    : styles.buttonText
+                }
+              >
+                To complete
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setSelectedTab("In Progress")}
               style={
                 selectedTab === "In Progress"
-                  ? styles.buttonTextActive
-                  : styles.buttonText
+                  ? styles.buttonActive
+                  : styles.button
               }
             >
-              In Progress
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => setSelectedTab("Completed")}
-            style={styles.button}
-          >
-            <Text
+              <Text
+                style={
+                  selectedTab === "In Progress"
+                    ? styles.buttonTextActive
+                    : styles.buttonText
+                }
+              >
+                In Progress
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setSelectedTab("Completed")}
               style={
                 selectedTab === "Completed"
-                  ? styles.buttonTextActive
-                  : styles.buttonText
+                  ? styles.buttonActive
+                  : styles.button
               }
             >
-              Completed
-            </Text>
-          </TouchableOpacity>
-        </View>
-        {tasks.map(renderItem)}
-    </ParallaxScrollView>
+              <Text
+                style={
+                  selectedTab === "Completed"
+                    ? styles.buttonTextActive
+                    : styles.buttonText
+                }
+              >
+                Completed
+              </Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView
+            style={styles.scrollView}
+            contentContainerStyle={styles.listContainer}
+          >
+            {filteredTasks.map(renderItem)}
+          </ScrollView>
+        </BottomSheetView>
+      </BottomSheet>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flex: 1,
-    flexDirection: "row",
-    justifyContent: "center",
-    gap: 8,
-  },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
-  },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: "absolute",
-  },
   container: {
     flex: 1,
-    backgroundColor: "#FFF",
-    paddingTop: 50,
+    backgroundColor: "#1D3D47",
+  },
+  map: {
+    width: "100%",
+    height: "100%",
+  },
+  titleContainer: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 8,
   },
   buttonRow: {
     flexDirection: "row",
-    justifyContent: 'space-around',
-    justifyContent: "center",
+    justifyContent: "space-around",
+    marginVertical: 15,
+    marginHorizontal: 10,
+  },
+  titleHeading: {
+    fontSize: 26,
+    fontWeight: 'bold',
+    lineHeight: 32,
   },
   button: {
-    paddingHorizontal: 5,
-    paddingVertical: 5,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  buttonText: {
-    fontSize: 16,
-    color: "#FFF",
-    borderRadius: 10,
-    paddingHorizontal: 15,
+    paddingHorizontal: 20,
     paddingVertical: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 10,
+    borderWidth: 0.75,
+    borderColor: "#ccc",
   },
-  buttonTextActive: {
-    fontSize: 16,
-    color: "#FFF",
+  buttonActive: {
     backgroundColor: "#1890FF",
-    borderRadius: 10,
-    paddingHorizontal: 15,
+    paddingHorizontal: 20,
     paddingVertical: 8,
-  },
-  listContainer: {
-    paddingHorizontal: 7,
-  },
-  taskContainer: {
-    padding: 15,
-    marginHorizontal: 5,
-    marginVertical: 0,
+    alignItems: "center",
+    justifyContent: "center",
     borderRadius: 10,
     borderWidth: 1,
+    borderColor: "#1890FF",
   },
-  taskTime: {
-    fontSize: 14,
+  buttonText: {
+    fontSize: 15,
     color: "#000",
   },
-  taskTitleContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 5,
+  buttonTextActive: {
+    fontSize: 15,
+    color: "#FFF",
   },
-  taskIcon: {
-    fontSize: 20,
-    marginRight: 5,
+  scrollView: {
+    flex: 1,
+  },
+  listContainer: {
+    paddingHorizontal: 10,
+    paddingBottom: 20,
+  },
+  taskContainer: {
+    padding: 20,
+    marginVertical: 10,
+    borderRadius: 10,
+    borderWidth: 0.75,
+    borderColor: "#ccc",
+  },
+  taskTime: {
+    fontSize: 12,
+    color: "#666",
+    marginBottom: 5,
+  },
+  taskTitleContainer: {
+    marginBottom: 10,
   },
   taskTitle: {
     fontSize: 18,
     fontWeight: "bold",
-    color: "#000",
+    marginBottom: 5,
+  },
+  mapLink: {
+    color: "#1E90FF",
+    textDecorationLine: "underline",
+  },
+  completionDate: {
+    fontSize: 14,
+    color: "#666",
+    marginBottom: 5,
+  },
+  pocName: {
+    fontSize: 16,
+    fontWeight: "bold",
+  },
+  pocPhoneNo: {
+    fontSize: 14,
+    color: "#1E90FF",
+    textDecorationLine: "underline",
   },
   taskDescription: {
     fontSize: 14,
-    color: "#000",
-    marginTop: 5,
+    color: "#333",
+  },
+  editButton: {
+    alignItems: "center",
+    backgroundColor: "#1E90FF",
+    padding: 10,
+    borderRadius: 5,
+  },
+  editButtonText: {
+    color: "#fff",
+    fontSize: 16,
+  },
+  bottomSheetContent: {
+    flex: 1,
+    paddingHorizontal: 7,
   },
 });
