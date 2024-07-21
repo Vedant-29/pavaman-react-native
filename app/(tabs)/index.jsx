@@ -1,5 +1,13 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { StyleSheet, View, Text, TouchableOpacity, Alert } from "react-native";
+import React, { useEffect, useMemo, useState, useRef } from "react";
+import {
+  StyleSheet,
+  View,
+  Text,
+  TouchableOpacity,
+  Alert,
+  Button,
+  Modal,
+} from "react-native";
 import BottomSheet, { BottomSheetView } from "@gorhom/bottom-sheet";
 import { ScrollView } from "react-native-gesture-handler";
 import MapView, { Marker } from "react-native-maps";
@@ -8,6 +16,7 @@ import { supabase } from "@/lib/supabase";
 import Icon from "react-native-vector-icons/FontAwesome";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import moment from "moment";
+import { Linking } from "react-native";
 
 export default function HomeScreen() {
   const [selectedTab, setSelectedTab] = useState("To complete");
@@ -16,8 +25,35 @@ export default function HomeScreen() {
   const [location, setLocation] = useState(null);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [selectedTaskCoordinates, setSelectedTaskCoordinates] = useState(null);
 
   const snapPoints = useMemo(() => ["25%", "50%", "75%", "90%"], []);
+  const mapRef = useRef(null);
+  const bottomSheetRef = useRef(null); // Add a reference to the BottomSheet
+
+  const [modalVisible, setModalVisible] = useState(false);
+  const [selectedItemId, setSelectedItemId] = useState(null);
+
+  const handleEditPress = (itemId) => {
+    setSelectedItemId(itemId);
+    setModalVisible(true);
+  };
+
+  const updateTaskStatus = async (itemId, newStatus) => {
+    const { data, error } = await supabase
+      .from("employee_tasks")
+      .update({ status: newStatus })
+      .eq("id", itemId)
+      .eq("assigned_to_id", session.user?.id);
+
+    if (error) {
+      console.error("Update error:", error);
+    } else {
+      console.log("Update successful:", data);
+      fetchTasks(session.user?.id, selectedDate);
+      setModalVisible(false);
+    }
+  };
 
   useEffect(() => {
     getPermissions();
@@ -52,6 +88,7 @@ export default function HomeScreen() {
     let currentLocation = await Location.getCurrentPositionAsync({});
     setLocation(currentLocation);
   };
+
   const fetchTasks = async (userId, date) => {
     const startOfDay = moment(date).startOf("day").toISOString();
     const endOfDay = moment(date).endOf("day").toISOString();
@@ -69,12 +106,21 @@ export default function HomeScreen() {
       setTasksNew(data);
     }
   };
+
   const handlePhonePress = (phoneNo) => {
     console.log(phoneNo);
   };
 
-  const handleMapPress = (mapLink) => {
-    console.log(mapLink);
+  const handleMapPress = async (url) => {
+    // Check if the link is supported
+    const supported = await Linking.canOpenURL(url);
+
+    if (supported) {
+      // Open the link with the default browser
+      await Linking.openURL(url);
+    } else {
+      console.error("Don't know how to open this URL: " + url);
+    }
   };
 
   const handleSendLocation = async () => {
@@ -112,46 +158,133 @@ export default function HomeScreen() {
     setSelectedDate(currentDate);
   };
 
+  const handleTaskPress = (coordinates) => {
+    setSelectedTaskCoordinates(coordinates);
+    if (mapRef.current) {
+      mapRef.current.animateToRegion({
+        ...coordinates,
+        latitudeDelta: 0.01,
+        longitudeDelta: 0.01,
+      });
+    }
+    if (bottomSheetRef.current) {
+      bottomSheetRef.current.snapToIndex(0); // Snap to 25% snap point
+    }
+  };
+
   const renderItem = (item) => (
-    <View style={renderStyles.taskContainer}>
-      <View style={renderStyles.taskHeader}>
-        <Text style={renderStyles.taskTitle}>{item.location_name}</Text>
-        <View style={renderStyles.iconContainer}>
-          <TouchableOpacity
-            onPress={() => handleMapPress(item.location_map_link)}
-            style={renderStyles.iconStyle}
-          >
-            <Icon name="map-marker" size={24} color="#1E90FF" />
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => handleEditPress(item.id)}
-            style={renderStyles.iconStyleSecond}
-          >
-            <Icon name="edit" size={24} color="#1E90FF" />
-          </TouchableOpacity>
+    <TouchableOpacity
+      onPress={() =>
+        handleTaskPress({ latitude: item.latitude, longitude: item.longitude })
+      }
+    >
+      <View style={renderStyles.taskContainer}>
+        <View style={renderStyles.taskHeader}>
+          <Text style={renderStyles.taskTitle}>{item.location_name}</Text>
+          <View style={renderStyles.iconContainer}>
+            <TouchableOpacity
+              onPress={() => handleMapPress(item.location_map_link)}
+              style={renderStyles.iconStyle}
+            >
+              <Icon name="map-marker" size={24} color="#1E90FF" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => handleEditPress(item.id)}
+              style={renderStyles.iconStyleSecond}
+            >
+              <Icon name="edit" size={24} color="#1E90FF" />
+            </TouchableOpacity>
+            <Modal
+              animationType="none"
+              transparent={true}
+              visible={modalVisible}
+              onRequestClose={() => {
+                setModalVisible(!modalVisible);
+              }}
+            >
+              <View style={modalStyles.modalBackground}>
+                <View style={modalStyles.modalContainer}>
+                  <Text style={modalStyles.title}>Select a new status:</Text>
+                  <View style={modalStyles.buttonRow}>
+                    <TouchableOpacity
+                      style={[
+                        modalStyles.statusButton,
+                        modalStyles.toCompleteButton,
+                      ]}
+                      onPress={() =>
+                        updateTaskStatus(selectedItemId, "To complete")
+                      }
+                    >
+                      <Text style={modalStyles.buttonText}>To Complete</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        modalStyles.statusButton,
+                        modalStyles.inProgressButton,
+                      ]}
+                      onPress={() =>
+                        updateTaskStatus(selectedItemId, "In Progress")
+                      }
+                    >
+                      <Text style={modalStyles.buttonText}>In Progress</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        modalStyles.statusButton,
+                        modalStyles.completedButton,
+                      ]}
+                      onPress={() =>
+                        updateTaskStatus(selectedItemId, "Completed")
+                      }
+                    >
+                      <Text style={modalStyles.buttonText}>Completed</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <Button
+                    title="Cancel"
+                    onPress={() => setModalVisible(false)}
+                  />
+                </View>
+              </View>
+            </Modal>
+          </View>
         </View>
+        <View style={renderStyles.pocContainer}>
+          <Text style={renderStyles.pocName}>{item.location_poc_name}</Text>
+          <Text style={renderStyles.pocPhoneNo}>
+            {item.location_poc_phoneNo}
+          </Text>
+        </View>
+        <Text style={renderStyles.taskDescription}>
+          Task created at {new Date(item.created_at).toLocaleDateString()}{" "}
+          {new Date(item.created_at).toLocaleTimeString()}
+        </Text>
       </View>
-      <View style={renderStyles.pocContainer}>
-        <Text style={renderStyles.pocName}>{item.location_poc_name}</Text>
-        <Text style={renderStyles.pocPhoneNo}>{item.location_poc_phoneNo}</Text>
-      </View>
-      <Text style={renderStyles.taskDescription}>
-        Task created at {new Date(item.created_at).toLocaleDateString()}{" "}
-        {new Date(item.created_at).toLocaleTimeString()}
-      </Text>
-    </View>
+    </TouchableOpacity>
   );
 
   const filteredTasks = tasksNew.filter((task) => task.status === selectedTab);
 
   return (
     <View style={styles.container}>
-      <MapView style={styles.map} showsUserLocation showsMyLocationButton>
+      <MapView
+        ref={mapRef}
+        style={styles.map}
+        showsUserLocation
+        showsMyLocationButton
+      >
         {tasksNew.map((marker, index) => (
-          <Marker key={marker.id} index={index} coordinate={marker} />
+          <Marker
+            key={marker.id}
+            index={index}
+            coordinate={{
+              latitude: marker.latitude,
+              longitude: marker.longitude,
+            }}
+          />
         ))}
       </MapView>
-      <BottomSheet snapPoints={snapPoints} index={2}>
+      <BottomSheet ref={bottomSheetRef} snapPoints={snapPoints} index={2}>
         <BottomSheetView style={styles.bottomSheetContent}>
           <View style={styles.titleContainer}>
             <TouchableOpacity
@@ -409,9 +542,9 @@ const renderStyles = StyleSheet.create({
     borderRadius: 8,
     shadowColor: "#000",
     shadowOpacity: 0.1,
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 1 },
     shadowRadius: 8,
-    elevation: 3,
+    elevation: 2,
   },
   taskHeader: {
     flexDirection: "row",
@@ -460,5 +593,51 @@ const renderStyles = StyleSheet.create({
     height: 40,
     borderRadius: 100,
     backgroundColor: "#F0F0F0",
+  },
+});
+
+const modalStyles = StyleSheet.create({
+  modalBackground: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+  },
+  modalContainer: {
+    width: "80%",
+    backgroundColor: "white",
+    borderRadius: 10,
+    padding: 20,
+    alignItems: "center",
+  },
+  title: {
+    fontSize: 18,
+    marginBottom: 15,
+  },
+  buttonRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 15,
+  },
+  statusButton: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 5,
+    borderRadius: 5,
+    marginHorizontal: 5,
+  },
+  toCompleteButton: {
+    backgroundColor: "#D1A700",
+  },
+  inProgressButton: {
+    backgroundColor: "#00ccff",
+  },
+  completedButton: {
+    backgroundColor: "#00cc66",
+  },
+  buttonText: {
+    color: "white",
+    fontWeight: "bold",
   },
 });
