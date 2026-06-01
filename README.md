@@ -93,7 +93,7 @@ perspective:
 
 | Module | Responsibility |
 |---|---|
-| `lib/supabase.ts` | Single `createClient` instance with `AsyncStorage` as the auth store. Wires `AppState` so `startAutoRefresh` / `stopAutoRefresh` follow foreground / background. |
+| `lib/supabase.ts` | Single `createClient` instance reading `EXPO_PUBLIC_SUPABASE_URL` / `EXPO_PUBLIC_SUPABASE_ANON_KEY` from env, with `AsyncStorage` as the auth store. Wires `AppState` so `startAutoRefresh` / `stopAutoRefresh` follow foreground / background. |
 | `app/_layout.tsx` | Splash + font loading, auth subscription, gates the entire UI on `session?.user`. |
 | `app/(tabs)/_layout.tsx` | Tab bar with Home and Profile icons + colorscheme-aware tint. |
 | `app/(tabs)/index.jsx` | Home: map + bottom sheet + date picker + task list + status modal + GPS-ping. |
@@ -150,18 +150,28 @@ npm install
 
 ### 2. Configure environment
 
-The repo ships with a hardcoded Supabase URL / anon key in
-`lib/supabase.ts` and a Google Maps key in `app.json`. For a real
-deploy, move both behind `expo-constants` env values and gate the
-keys in Supabase + Google Cloud console:
+Copy `.env.example` to `.env` and fill in:
 
-- **Supabase:** replace `supabaseUrl` and `supabaseAnonKey` in
-  `lib/supabase.ts` with your project's values. Enforce RLS on
-  `employee_users` and `employee_tasks` so an authenticated user can
-  only read/write their own rows.
-- **Google Maps:** replace `expo.android.config.googleMapsApiKey` in
-  `app.json`. In Google Cloud, restrict the key by Android package
-  name + SHA-1 and by iOS bundle id.
+```bash
+cp .env.example .env
+```
+
+| Variable | Where to get it |
+|---|---|
+| `EXPO_PUBLIC_SUPABASE_URL` | Supabase dashboard → your project → Settings → API |
+| `EXPO_PUBLIC_SUPABASE_ANON_KEY` | Same page. RLS-gated, but still treat as a credential. |
+| `GOOGLE_MAPS_ANDROID_API_KEY` | Google Cloud console → APIs & Services → Credentials. Read by `app.json` at build time. |
+
+`EXPO_PUBLIC_*` variables are inlined into the JS bundle by Expo, so
+they are visible to anyone who downloads the app — treat the Supabase
+anon key as a public identifier and rely on RLS for actual access
+control:
+
+- Enforce RLS on `employee_users` and `employee_tasks` so an
+  authenticated user can only read / write their own rows.
+- Restrict the Google Maps key by Android package name + SHA-1
+  fingerprint (and by iOS bundle id) in Google Cloud console before
+  going live.
 
 ### 3. Permissions
 
